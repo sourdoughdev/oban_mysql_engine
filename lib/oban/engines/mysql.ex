@@ -20,8 +20,7 @@ defmodule Oban.Engines.MySQL do
 
   alias Ecto.Changeset
   alias Oban.Engines.Basic
-  # alias Oban.{Config, Engine, Job, Repo}
-  # alias Oban.{Config,lib/oban/engines/mysql.ex:65 Engine, Job, Repo}
+  alias Oban.{Config, Engine, Job, Repo}
 
   @forever 60 * 60 * 24 * 365 * 99
 
