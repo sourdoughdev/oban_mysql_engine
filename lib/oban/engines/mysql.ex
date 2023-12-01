@@ -43,28 +43,28 @@ defmodule Oban.Engines.MySQL do
   end
 
   @impl Engine
-  defdelegate init(conf, opts), to: Basic
+  defdelegate init(%Config{} = conf, opts), to: Basic
 
   @impl Engine
-  defdelegate put_meta(conf, meta, key, value), to: Basic
+  defdelegate put_meta(%Config{} = conf, meta, key, value), to: Basic
 
   @impl Engine
-  defdelegate check_meta(conf, meta, running), to: Basic
+  defdelegate check_meta(%Config{} = conf, meta, running), to: Basic
 
   @impl Engine
-  defdelegate refresh(conf, meta), to: Basic
+  defdelegate refresh(%Config{} = conf, meta), to: Basic
 
   @impl Engine
-  defdelegate shutdown(conf, meta), to: Basic
+  defdelegate shutdown(%Config{} = conf, meta), to: Basic
 
   @impl Engine
-  def insert_job(conf, %Changeset{} = changeset, _opts) do
-    # with {:ok, job} <- fetch_unique(conf, changeset),
-    #      {:ok, job} <- resolve_conflict(conf, job, changeset) do
+  def insert_job(%Config{} = conf, %Changeset{} = changeset, _opts) do
+    # with {:ok, job} <- fetch_unique(%Config{} = conf, changeset),
+    #      {:ok, job} <- resolve_conflict(%Config{} = conf, job, changeset) do
     #   {:ok, %Oban.Job{job | conflict?: true}}
     # else
     #   :not_found ->
-    #     Repo.insert(conf, changeset)
+    #     Repo.insert(%Config{} = conf, changeset)
 
     #   error ->
     #     error
@@ -72,7 +72,7 @@ defmodule Oban.Engines.MySQL do
   end
 
   @impl Engine
-  defdelegate insert_all_jobs(conf, changesets, opts), to: Basic
+  defdelegate insert_all_jobs(%Config{} = conf, changesets, opts), to: Basic
 
   @impl Engine
   def fetch_jobs(_conf, %{paused: true} = meta, _running) do
@@ -83,7 +83,7 @@ defmodule Oban.Engines.MySQL do
     {:ok, {meta, []}}
   end
 
-  def fetch_jobs(conf, meta, running) do
+  def fetch_jobs(%Config{} = conf, meta, running) do
     demand = meta.limit - map_size(running)
 
     subset =
@@ -106,7 +106,7 @@ defmodule Oban.Engines.MySQL do
       |> select([j, _], j)
 
     jobs =
-      case Repo.update_all(conf, query, updates) do
+      case Repo.update_all(%Config{} = conf, query, updates) do
         {0, nil} -> []
         {_count, jobs} -> jobs
       end
@@ -115,7 +115,7 @@ defmodule Oban.Engines.MySQL do
   end
 
   @impl Engine
-  def stage_jobs(conf, queryable, opts) do
+  def stage_jobs(%Config{} = conf, queryable, opts) do
     limit = Keyword.fetch!(opts, :limit)
 
     select_query =
@@ -125,10 +125,10 @@ defmodule Oban.Engines.MySQL do
       |> where([j], j.scheduled_at <= ^DateTime.utc_now())
       |> limit(^limit)
 
-    staged = Repo.all(conf, select_query)
+    staged = Repo.all(%Config{} = conf, select_query)
 
     if Enum.any?(staged) do
-      Repo.update_all(conf, where(Job, [j], j.id in ^Enum.map(staged, & &1.id)),
+      Repo.update_all(%Config{} = conf, where(Job, [j], j.id in ^Enum.map(staged, & &1.id)),
         set: [state: "available"]
       )
     end
@@ -137,7 +137,7 @@ defmodule Oban.Engines.MySQL do
   end
 
   @impl Engine
-  def prune_jobs(conf, queryable, opts) do
+  def prune_jobs(%Config{} = conf, queryable, opts) do
     max_age = Keyword.fetch!(opts, :max_age)
     limit = Keyword.fetch!(opts, :limit)
     time = DateTime.add(DateTime.utc_now(), -max_age)
@@ -149,23 +149,23 @@ defmodule Oban.Engines.MySQL do
       |> where([j], j.scheduled_at < ^time)
       |> limit(^limit)
 
-    pruned = Repo.all(conf, select_query)
+    pruned = Repo.all(%Config{} = conf, select_query)
 
     if Enum.any?(pruned) do
-      Repo.delete_all(conf, where(Job, [j], j.id in ^Enum.map(pruned, & &1.id)))
+      Repo.delete_all(%Config{} = conf, where(Job, [j], j.id in ^Enum.map(pruned, & &1.id)))
     end
 
     {:ok, pruned}
   end
 
   @impl Engine
-  defdelegate complete_job(conf, job), to: Basic
+  defdelegate complete_job(%Config{} = conf, job), to: Basic
 
   @impl Engine
-  defdelegate snooze_job(conf, job, seconds), to: Basic
+  defdelegate snooze_job(%Config{} = conf, job, seconds), to: Basic
 
   @impl Engine
-  def discard_job(conf, job) do
+  def discard_job(%Config{} = conf, job) do
     query =
       Job
       |> where(id: ^job.id)
@@ -177,13 +177,13 @@ defmodule Oban.Engines.MySQL do
         ]
       )
 
-    Repo.update_all(conf, query, [])
+    Repo.update_all(%Config{} = conf, query, [])
 
     :ok
   end
 
   @impl Engine
-  def error_job(conf, job, seconds) do
+  def error_job(%Config{} = conf, job, seconds) do
     query =
       Job
       |> where(id: ^job.id)
@@ -195,13 +195,13 @@ defmodule Oban.Engines.MySQL do
         ]
       )
 
-    Repo.update_all(conf, query, [])
+    Repo.update_all(%Config{} = conf, query, [])
 
     :ok
   end
 
   @impl Engine
-  def cancel_job(conf, job) do
+  def cancel_job(%Config{} = conf, job) do
     query = where(Job, id: ^job.id)
 
     query =
@@ -219,13 +219,13 @@ defmodule Oban.Engines.MySQL do
         |> update(set: [state: "cancelled", cancelled_at: ^utc_now()])
       end
 
-    Repo.update_all(conf, query, [])
+    Repo.update_all(%Config{} = conf, query, [])
 
     :ok
   end
 
   @impl Engine
-  def cancel_all_jobs(conf, queryable) do
+  def cancel_all_jobs(%Config{} = conf, queryable) do
     base_query = where(queryable, [j], j.state not in ["cancelled", "completed", "discarded"])
 
     # In SQLite3 an "UPDATE FROM" query returns the final value, not the original from a join. A
@@ -233,7 +233,7 @@ defmodule Oban.Engines.MySQL do
     states_map =
       base_query
       |> select([j], {j.id, j.state})
-      |> then(&Repo.all(conf, &1))
+      |> then(&Repo.all(%Config{} = conf, &1))
       |> Map.new()
 
     query = select(base_query, [j], map(j, [:id, :queue, :state, :worker]))
@@ -248,14 +248,14 @@ defmodule Oban.Engines.MySQL do
   end
 
   # @impl Engine
-  # def retry_job(conf, %Job{id: id}) do
-  #   retry_all_jobs(conf, where(Job, [j], j.id == ^id))
+  # def retry_job(%Config{} = conf, %Job{id: id}) do
+  #   retry_all_jobs(%Config{} = conf, where(Job, [j], j.id == ^id))
 
   #   :ok
   # end
 
   @impl Engine
-  def retry_all_jobs(conf, queryable) do
+  def retry_all_jobs(%Config{} = conf, queryable) do
     subquery = where(queryable, [j], j.state not in ["available", "executing"])
 
     query =
@@ -273,14 +273,14 @@ defmodule Oban.Engines.MySQL do
         ]
       )
 
-    {_, jobs} = Repo.update_all(conf, query, [])
+    {_, jobs} = Repo.update_all(%Config{} = conf, query, [])
 
     {:ok, jobs}
   end
 
   # Insertion
 
-  defp fetch_unique(conf, %{changes: %{unique: %{} = unique}} = changeset) do
+  defp fetch_unique(%Config{} = conf, %{changes: %{unique: %{} = unique}} = changeset) do
     %{fields: fields, keys: keys, period: period, states: states, timestamp: timestamp} = unique
 
     keys = Enum.map(keys, &to_string/1)
@@ -314,7 +314,7 @@ defmodule Oban.Engines.MySQL do
       |> where(^dynamic)
       |> limit(1)
 
-    case Repo.one(conf, query) do
+    case Repo.one(%Config{} = conf, query) do
       nil -> :not_found
       job -> {:ok, job}
     end
@@ -330,12 +330,12 @@ defmodule Oban.Engines.MySQL do
     end
   end
 
-  defp resolve_conflict(conf, job, changeset) do
+  defp resolve_conflict(%Config{} = conf, job, changeset) do
     case Changeset.fetch_change(changeset, :replace) do
       {:ok, replace} ->
         keys = Keyword.get(replace, String.to_existing_atom(job.state), [])
 
-        Repo.update(conf, Changeset.change(job, Map.take(changeset.changes, keys)))
+        Repo.update(%Config{} = conf, Changeset.change(job, Map.take(changeset.changes, keys)))
 
       :error ->
         {:ok, job}
