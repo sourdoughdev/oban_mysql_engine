@@ -24,6 +24,7 @@ defmodule Oban.Engines.MySQL do
 
   @forever 60 * 60 * 24 * 365 * 99
 
+  # EctoSQLite3 doesn't implement `push` for updates, so a json_insert is required.
   defmacrop json_push(column, value) do
     quote do
       fragment("json_insert(?, '$[#]', ?)", unquote(column), unquote(value))
@@ -43,36 +44,36 @@ defmodule Oban.Engines.MySQL do
   end
 
   @impl Engine
-  defdelegate init(%Config{} = conf, opts), to: Basic
+  defdelegate init(conf, opts), to: Basic
 
   @impl Engine
-  defdelegate put_meta(%Config{} = conf, meta, key, value), to: Basic
+  defdelegate put_meta(conf, meta, key, value), to: Basic
 
   @impl Engine
-  defdelegate check_meta(%Config{} = conf, meta, running), to: Basic
+  defdelegate check_meta(conf, meta, running), to: Basic
 
   @impl Engine
-  defdelegate refresh(%Config{} = conf, meta), to: Basic
+  defdelegate refresh(conf, meta), to: Basic
 
   @impl Engine
-  defdelegate shutdown(%Config{} = conf, meta), to: Basic
+  defdelegate shutdown(conf, meta), to: Basic
 
   @impl Engine
   def insert_job(%Config{} = conf, %Changeset{} = changeset, _opts) do
-    # with {:ok, job} <- fetch_unique(%Config{} = conf, changeset),
-    #      {:ok, job} <- resolve_conflict(%Config{} = conf, job, changeset) do
-    #   {:ok, %Oban.Job{job | conflict?: true}}
-    # else
-    #   :not_found ->
-    #     Repo.insert(%Config{} = conf, changeset)
+    with {:ok, job} <- fetch_unique(conf, changeset),
+         {:ok, job} <- resolve_conflict(conf, job, changeset) do
+      {:ok, %Job{job | conflict?: true}}
+    else
+      :not_found ->
+        Repo.insert(conf, changeset)
 
-    #   error ->
-    #     error
-    # end
+      error ->
+        error
+    end
   end
 
   @impl Engine
-  defdelegate insert_all_jobs(%Config{} = conf, changesets, opts), to: Basic
+  defdelegate insert_all_jobs(conf, changesets, opts), to: Basic
 
   @impl Engine
   def fetch_jobs(_conf, %{paused: true} = meta, _running) do
@@ -106,7 +107,7 @@ defmodule Oban.Engines.MySQL do
       |> select([j, _], j)
 
     jobs =
-      case Repo.update_all(%Config{} = conf, query, updates) do
+      case Repo.update_all(conf, query, updates) do
         {0, nil} -> []
         {_count, jobs} -> jobs
       end
@@ -125,10 +126,10 @@ defmodule Oban.Engines.MySQL do
       |> where([j], j.scheduled_at <= ^DateTime.utc_now())
       |> limit(^limit)
 
-    staged = Repo.all(%Config{} = conf, select_query)
+    staged = Repo.all(conf, select_query)
 
     if Enum.any?(staged) do
-      Repo.update_all(%Config{} = conf, where(Job, [j], j.id in ^Enum.map(staged, & &1.id)),
+      Repo.update_all(conf, where(Job, [j], j.id in ^Enum.map(staged, & &1.id)),
         set: [state: "available"]
       )
     end
@@ -149,20 +150,20 @@ defmodule Oban.Engines.MySQL do
       |> where([j], j.scheduled_at < ^time)
       |> limit(^limit)
 
-    pruned = Repo.all(%Config{} = conf, select_query)
+    pruned = Repo.all(conf, select_query)
 
     if Enum.any?(pruned) do
-      Repo.delete_all(%Config{} = conf, where(Job, [j], j.id in ^Enum.map(pruned, & &1.id)))
+      Repo.delete_all(conf, where(Job, [j], j.id in ^Enum.map(pruned, & &1.id)))
     end
 
     {:ok, pruned}
   end
 
   @impl Engine
-  defdelegate complete_job(%Config{} = conf, job), to: Basic
+  defdelegate complete_job(conf, job), to: Basic
 
   @impl Engine
-  defdelegate snooze_job(%Config{} = conf, job, seconds), to: Basic
+  defdelegate snooze_job(conf, job, seconds), to: Basic
 
   @impl Engine
   def discard_job(%Config{} = conf, job) do
@@ -177,7 +178,7 @@ defmodule Oban.Engines.MySQL do
         ]
       )
 
-    Repo.update_all(%Config{} = conf, query, [])
+    Repo.update_all(conf, query, [])
 
     :ok
   end
@@ -195,7 +196,7 @@ defmodule Oban.Engines.MySQL do
         ]
       )
 
-    Repo.update_all(%Config{} = conf, query, [])
+    Repo.update_all(conf, query, [])
 
     :ok
   end
@@ -219,7 +220,7 @@ defmodule Oban.Engines.MySQL do
         |> update(set: [state: "cancelled", cancelled_at: ^utc_now()])
       end
 
-    Repo.update_all(%Config{} = conf, query, [])
+    Repo.update_all(conf, query, [])
 
     :ok
   end
@@ -233,7 +234,7 @@ defmodule Oban.Engines.MySQL do
     states_map =
       base_query
       |> select([j], {j.id, j.state})
-      |> then(&Repo.all(%Config{} = conf, &1))
+      |> then(&Repo.all(conf, &1))
       |> Map.new()
 
     query = select(base_query, [j], map(j, [:id, :queue, :state, :worker]))
@@ -247,12 +248,12 @@ defmodule Oban.Engines.MySQL do
     {:ok, jobs}
   end
 
-  # @impl Engine
-  # def retry_job(%Config{} = conf, %Job{id: id}) do
-  #   retry_all_jobs(%Config{} = conf, where(Job, [j], j.id == ^id))
+  @impl Engine
+  def retry_job(%Config{} = conf, %Job{id: id}) do
+    retry_all_jobs(conf, where(Job, [j], j.id == ^id))
 
-  #   :ok
-  # end
+    :ok
+  end
 
   @impl Engine
   def retry_all_jobs(%Config{} = conf, queryable) do
@@ -273,14 +274,14 @@ defmodule Oban.Engines.MySQL do
         ]
       )
 
-    {_, jobs} = Repo.update_all(%Config{} = conf, query, [])
+    {_, jobs} = Repo.update_all(conf, query, [])
 
     {:ok, jobs}
   end
 
   # Insertion
 
-  defp fetch_unique(%Config{} = conf, %{changes: %{unique: %{} = unique}} = changeset) do
+  defp fetch_unique(conf, %{changes: %{unique: %{} = unique}} = changeset) do
     %{fields: fields, keys: keys, period: period, states: states, timestamp: timestamp} = unique
 
     keys = Enum.map(keys, &to_string/1)
@@ -314,7 +315,7 @@ defmodule Oban.Engines.MySQL do
       |> where(^dynamic)
       |> limit(1)
 
-    case Repo.one(%Config{} = conf, query) do
+    case Repo.one(conf, query) do
       nil -> :not_found
       job -> {:ok, job}
     end
@@ -330,12 +331,12 @@ defmodule Oban.Engines.MySQL do
     end
   end
 
-  defp resolve_conflict(%Config{} = conf, job, changeset) do
+  defp resolve_conflict(conf, job, changeset) do
     case Changeset.fetch_change(changeset, :replace) do
       {:ok, replace} ->
         keys = Keyword.get(replace, String.to_existing_atom(job.state), [])
 
-        Repo.update(%Config{} = conf, Changeset.change(job, Map.take(changeset.changes, keys)))
+        Repo.update(conf, Changeset.change(job, Map.take(changeset.changes, keys)))
 
       :error ->
         {:ok, job}
